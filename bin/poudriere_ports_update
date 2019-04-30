@@ -1,0 +1,96 @@
+#!/bin/sh
+
+# -----------------------------------
+# Adapt these to fit your environment
+
+MY_PORTS="$HOME/ports-mine/ports"
+SRC_DATASET="zroot/poudriere/ports/default"
+TARGET_DATASET="zroot/poudriere/ports/development"
+UPDATE_PORTTREE="default"
+
+# -----------------------------------
+
+today=$(date '+%Y-%m-%d')
+targetsnap="zroot/poudriere/ports/default"
+
+if ! [ -d "$MY_PORTS" ]; then
+	echo "The directory $MY_PORTS does not exist."
+	exit 1
+fi
+
+snaplist=$(zfs list -t snapshot)
+if echo "$snaplist" | grep -q "^${targetsnap}@${today}[[:space:]]"; then
+	today=$(date '+%Y-%m-%d_%H-%M-%S')
+	if echo "$snaplist" | grep -q "^${targetsnap}@${today}[[:space:]]"; then
+		echo "Snapshot ${targetsnap}@${today} seems to already exist:"
+		echo "$snaplist"
+		exit 1
+	fi
+fi
+targetsnap="${targetsnap}@${today}"
+tmp_rename_dataset="${TARGET_DATASET}-${today}"
+
+srcpath=$(zfs get -H -o value mountpoint "$SRC_DATASET")
+if [ -z "$srcpath" ]; then
+	echo "Could not find path of filesystem ${SRC_DATASET}."
+	exit 1
+fi
+
+targetpath=$(zfs get -H -o value mountpoint "$TARGET_DATASET")
+if [ -z "$targetpath" ]; then
+	echo "Could not find path of filesystem ${TARGET_DATASET}."
+	exit 1
+fi
+
+if [ $(zfs get -H -o value mounted "$SRC_DATASET") = "no" ]; then
+	echo "The filesystem $SRC_DATASET is not mounted."
+	exit 1
+fi
+
+if [ $(zfs get -H -o value mounted "$TARGET_DATASET") = "no" ]; then
+	echo "The filesystem $TARGET_DATASET is not mounted."
+	exit 1
+fi
+
+if zfs list "$tmp_rename_dataset" >/dev/null 2>&1; then
+	echo "The temporary dataset $tmp_rename_dataset seems to already exist."
+	exit 1
+fi
+
+echo -n "Finding out if there's been some new local changes: "
+finddiff=$(rsync --dry-run -rcx -i --compare-dest "${srcpath}/" "${targetpath}/" "${MY_PORTS}/" 2>&1)
+
+if [ -n "$finddiff" ]; then
+	echo "There has been some new updates found, deal with this manually!"
+	echo "$finddiff"
+	exit 1
+fi
+echo "Nope, ready to go!"
+
+echo "Updating ports tree ${UPDATE_PORTTREE}:"
+sudo poudriere ports -u -p "$UPDATE_PORTTREE" || exit $?
+
+echo -n "Create snapshot ${targetsnap}: "
+sudo zfs snapshot "$targetsnap" || exit $?
+echo "OK"
+
+echo -n "Temporarily rename (and unmount) $TARGET_DATASET to ${tmp_rename_dataset}: "
+sudo zfs rename -u "$TARGET_DATASET" "$tmp_rename_dataset" || exit $?
+echo "OK"
+
+tmp_mount=$(dirname "$targetpath")/$(basename "$tmp_rename_dataset")
+echo -n "Update mountpoint of temporary ${tmp_rename_dataset} to ${tmp_mount}: "
+sudo zfs set mountpoint="$tmp_mount" "$tmp_rename_dataset"
+echo "OK"
+
+echo -n "Clone snapshot $targetsnap -> ${TARGET_DATASET}: "
+sudo zfs clone -o "mountpoint=$targetpath" "$targetsnap" "$TARGET_DATASET" || exit $?
+echo "OK"
+
+echo -n "Rsync changes from $MY_PORTS to ${TARGET_DATASET}: "
+sudo rsync -av "$MY_PORTS/" "$targetpath/" || exit 1
+echo "OK"
+
+echo -n "Delete temporary ${tmp_rename_dataset}: "
+sudo zfs destroy "$tmp_rename_dataset" || exit 1
+echo "OK"

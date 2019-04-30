@@ -1,0 +1,36 @@
+diff -Naur vncviewer.orig/parameters.cxx vncviewer/parameters.cxx
+--- vncviewer.orig/parameters.cxx	2018-07-16 16:08:55.000000000 +0200
++++ vncviewer/parameters.cxx	2018-12-29 01:54:50.245136000 +0100
+@@ -149,6 +149,7 @@
+ 
+ #ifndef WIN32
+ StringParameter via("via", "Gateway to tunnel via", "");
++StringParameter windowName("class", "Override vncviewer's resource class.", "");
+ #endif
+ 
+ static const char* IDENTIFIER_STRING = "TigerVNC Configuration file Version 1.0";
+diff -Naur vncviewer.orig/parameters.h vncviewer/parameters.h
+--- vncviewer.orig/parameters.h	2018-07-16 16:08:55.000000000 +0200
++++ vncviewer/parameters.h	2018-12-29 01:55:43.671462000 +0100
+@@ -65,6 +65,7 @@
+ 
+ #ifndef WIN32
+ extern rfb::StringParameter via;
++extern rfb::StringParameter windowName;
+ #endif
+ 
+ void saveViewerParameters(const char *filename, const char *servername=NULL);
+diff -Naur vncviewer.orig/vncviewer.cxx vncviewer/vncviewer.cxx
+--- vncviewer.orig/vncviewer.cxx	2018-07-16 16:08:55.000000000 +0200
++++ vncviewer/vncviewer.cxx	2018-12-29 02:25:01.653772000 +0100
+@@ -553,6 +553,10 @@
+     i++;
+   }
+ 
++  if(strlen(windowName.getValueStr()) > 0) {
++    Fl_Window::default_xclass(windowName.getValueStr());
++  }
++
+   // Check if the server name in reality is a configuration file
+   potentiallyLoadConfigurationFile(vncServerName);
+ 
